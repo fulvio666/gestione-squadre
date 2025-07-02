@@ -1,0 +1,157 @@
+import React, { useState, useRef } from 'react';
+import { useAppContext } from '../context/AppContext';
+import { TrashIcon, FileUpIcon, FileDownIcon } from './icons';
+import { Worker } from '../types';
+
+declare var XLSX: any;
+
+export const PersonnelView: React.FC = () => {
+  const { workers, addWorker, deleteWorker, importWorkers } = useAppContext();
+  const [newWorkerName, setNewWorkerName] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleAddWorker = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newWorkerName.trim()) {
+      addWorker(newWorkerName.trim());
+      setNewWorkerName('');
+    }
+  };
+  
+  const handleExport = () => {
+    const worksheet = XLSX.utils.json_to_sheet(workers);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Personale");
+    XLSX.writeFile(workbook, "personale.xlsx");
+  };
+  
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileImport = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = e.target?.result;
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        
+        const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false }) as any[][];
+
+        if (rows.length < 2) {
+            throw new Error("Il file è vuoto o contiene solo l'intestazione.");
+        }
+
+        const headers = rows[0].map(h => String(h || '').toLowerCase().trim());
+        const idIndex = headers.indexOf('id');
+        const nameIndex = headers.indexOf('name');
+
+        if (idIndex === -1 || nameIndex === -1) {
+            throw new Error("L'intestazione del file Excel deve contenere le colonne 'id' e 'name'.");
+        }
+
+        const newWorkers: Worker[] = [];
+        for (let i = 1; i < rows.length; i++) {
+            const row = rows[i];
+            const rowNum = i + 1;
+            
+            if (!row || row.length === 0) continue; // Skip empty rows
+
+            const id = parseInt(row[idIndex], 10);
+            const name = row[nameIndex];
+
+            if (isNaN(id)) {
+                throw new Error(`Riga ${rowNum}: La colonna 'id' (${row[idIndex]}) non è un numero valido.`);
+            }
+
+            if (!name || String(name).trim() === '') {
+                 throw new Error(`Riga ${rowNum}: La colonna 'name' non può essere vuota.`);
+            }
+
+            newWorkers.push({
+                id: id,
+                name: String(name).toUpperCase(),
+            });
+        }
+        
+        if (newWorkers.length > 0 && window.confirm(`Sei sicuro di voler sovrascrivere il personale esistente con i ${newWorkers.length} record dal file? Questa azione è irreversibile.`)) {
+          importWorkers(newWorkers);
+          alert(`Dati importati con successo! Aggiunti/aggiornati ${newWorkers.length} operai.`);
+        } else if (newWorkers.length === 0) {
+            alert("Nessun dato valido da importare trovato nel file.");
+        }
+      } catch (error: any) {
+        console.error("Errore durante l'importazione del file:", error);
+        alert(`Errore di importazione: ${error.message}`);
+      } finally {
+        if(event.target) {
+            event.target.value = '';
+        }
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+      <div className="md:col-span-1">
+        <div className="bg-white rounded-lg shadow p-6 sticky top-8">
+          <h3 className="text-lg font-bold text-slate-700 mb-4">Gestisci Personale</h3>
+          <form onSubmit={handleAddWorker} className="mb-6">
+            <label htmlFor="worker-name" className="block text-sm font-medium text-slate-600">Nome Operaio</label>
+            <input
+              id="worker-name"
+              type="text"
+              value={newWorkerName}
+              onChange={(e) => setNewWorkerName(e.target.value)}
+              placeholder="Es. MARIO ROSSI"
+              className="mt-1 block w-full p-2 border border-slate-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+            />
+            <button
+              type="submit"
+              className="mt-4 w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            >
+              Aggiungi Operaio
+            </button>
+          </form>
+          <div className="border-t border-slate-200 pt-6">
+             <h4 className="text-md font-bold text-slate-700 mb-3">Importa / Esporta</h4>
+             <div className="flex flex-col space-y-3">
+                <button onClick={handleImportClick} className="flex items-center justify-center gap-2 bg-teal-600 text-white py-2 px-4 rounded-md hover:bg-teal-700">
+                    <FileUpIcon className="w-5 h-5"/> Importa da Excel
+                </button>
+                <button onClick={handleExport} className="flex items-center justify-center gap-2 bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700">
+                    <FileDownIcon className="w-5 h-5"/> Esporta in Excel
+                </button>
+                <input type="file" ref={fileInputRef} onChange={handleFileImport} className="hidden" accept=".xlsx, .xls" />
+             </div>
+          </div>
+        </div>
+      </div>
+      <div className="md:col-span-2">
+        <h2 className="text-xl font-bold text-slate-700 mb-4">Elenco Personale</h2>
+        <div className="bg-white rounded-lg shadow overflow-hidden">
+          <ul className="divide-y divide-slate-200">
+            {workers.length > 0 ? workers.map(worker => (
+              <li key={worker.id} className="p-4 flex items-center justify-between hover:bg-slate-50">
+                <span className="font-medium text-slate-800">{worker.name}</span>
+                <button
+                  onClick={() => deleteWorker(worker.id)}
+                  className="text-slate-400 hover:text-red-600 transition-colors duration-150"
+                  aria-label={`Elimina ${worker.name}`}
+                >
+                  <TrashIcon className="w-5 h-5" />
+                </button>
+              </li>
+            )) : <p className="p-4 text-center text-slate-500">Nessun operaio presente.</p>}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+};
